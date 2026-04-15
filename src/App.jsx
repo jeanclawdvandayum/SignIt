@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { useAccount, useSignTypedData, useChainId, useSwitchChain } from "wagmi";
+import { useAccount, useSignTypedData, useChainId, useSwitchChain, useWriteContract } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { getAddress, ZeroAddress, TypedDataEncoder, toBigInt } from "ethers";
 
@@ -11,6 +11,27 @@ const API_BASE = {
 
 const CHAIN_IDS = { ethereum: 1, arbitrum: 42161, optimism: 10 };
 const CHAIN_NAMES = { 1: "ethereum", 42161: "arbitrum", 10: "optimism" };
+
+const SAFE_ABI = [
+  {
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "data", type: "bytes" },
+      { name: "operation", type: "uint8" },
+      { name: "safeTxGas", type: "uint256" },
+      { name: "baseGas", type: "uint256" },
+      { name: "gasPrice", type: "uint256" },
+      { name: "gasToken", type: "address" },
+      { name: "refundReceiver", type: "address" },
+      { name: "signatures", type: "bytes" },
+    ],
+    name: "execTransaction",
+    outputs: [{ name: "success", type: "bool" }],
+    stateMutability: "payable",
+    type: "function",
+  },
+];
 
 function shortAddr(addr) {
   if (!addr || typeof addr !== "string") return "";
@@ -24,11 +45,38 @@ function esc(str) {
     .replace(/>/g, "&gt;");
 }
 
+function buildSignatureBytes(confirmations) {
+  const sorted = [...confirmations].sort((a, b) => {
+    const aOwner = (a.owner || "").toLowerCase();
+    const bOwner = (b.owner || "").toLowerCase();
+    return aOwner < bOwner ? -1 : aOwner > bOwner ? 1 : 0;
+  });
+
+  let sigs = "0x";
+  for (const c of sorted) {
+    let sig = c.signature;
+    if (!sig) continue;
+    if (!sig.startsWith("0x")) sig = "0x" + sig;
+    // Strip any contract signature prefix if present (Safe API sometimes adds it)
+    // Standard ECDSA: 65 bytes (r=32 + s=32 + v=1)
+    // If signature is longer than 65 bytes, it may have a contract sig prefix
+    const sigBytes = sig.slice(2);
+    if (sigBytes.length > 130) {
+      // Contract signature: take last 65 bytes
+      sigs += sigBytes.slice(-130);
+    } else {
+      sigs += sigBytes.padEnd(130, "0").slice(0, 130);
+    }
+  }
+  return sigs;
+}
+
 export default function App() {
   const { address, isConnected } = useAccount();
   const walletChainId = useChainId();
   const { switchChain } = useSwitchChain();
   const { signTypedDataAsync } = useSignTypedData();
+  const { writeContractAsync } = useWriteContract();
 
   const [chain, setChain] = useState("arbitrum");
   const [safeAddress, setSafeAddress] = useState("");
@@ -40,6 +88,7 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [signing, setSigning] = useState(false);
+  const [executing, setExecuting] = useState(false);
 
   const txsRef = useRef(txs);
   txsRef.current = txs;
@@ -224,11 +273,80 @@ export default function App() {
     setSigning(false);
   }, [selected, signOne, addLog]);
 
+  const executeOne = useCallback(async (tx, idx) => {
+    let safe;
+    try { safe = getAddress(safeAddress); } catch {
+      addLog("Invalid Safe address.", "bad"); return;
+    }
+
+    if (!thresholdMet(tx)) {
+      addLog(`Nonce ${tx.nonce}: threshold not met, cannot execute.`, "bad");
+      return;
+    }
+
+    const confs = Array.isArray(tx.confirmations) ? tx.confirmations : [];
+    if (!confs.length) {
+      addLog(`Nonce ${tx.nonce}: no confirmations found.`, "bad");
+      return;
+    }
+
+    const cid = CHAIN_IDS[chain];
+    if (walletChainId !== cid) {
+      try { switchChain({ chainId: cid }); } catch {
+        addLog(`Switch wallet to chain ${cid} first.`, "bad"); return;
+      }
+    }
+
+    setExecuting(true);
+    try {
+      const signatures = buildSignatureBytes(confs);
+      addLog(`Nonce ${tx.nonce}: assembled ${confs.length} signature(s) (${(signatures.length - 2) / 2} bytes).`, "ok");
+      addLog(`Nonce ${tx.nonce}: submitting execTransaction...`);
+
+      const toDec = (v) => { try { return toBigInt(v ?? 0).toString(); } catch { return "0n"; } };
+
+      const hash = await writeContractAsync({
+        address: safe,
+        abi: SAFE_ABI,
+        functionName: "execTransaction",
+        args: [
+          getAddress(tx.to),
+          BigInt(toDec(tx.value)),
+          tx.data || "0x",
+          Number(tx.operation ?? 0),
+          BigInt(toDec(tx.safeTxGas)),
+          BigInt(toDec(tx.baseGas)),
+          BigInt(toDec(tx.gasPrice)),
+          tx.gasToken ? getAddress(tx.gasToken) : ZeroAddress,
+          tx.refundReceiver ? getAddress(tx.refundReceiver) : ZeroAddress,
+          signatures,
+        ],
+        value: BigInt(toDec(tx.value)),
+      });
+
+      addLog(`Nonce ${tx.nonce}: tx submitted! Hash: ${hash}`, "ok");
+      addLog(`Nonce ${tx.nonce}: waiting for confirmation...`, "ok");
+
+      // Mark as executed locally
+      setTxs(prev => {
+        const next = [...prev];
+        next[idx] = { ...next[idx], _executing: false, _executedTxHash: hash };
+        return next;
+      });
+
+    } catch (err) {
+      const msg = err?.shortMessage || err?.message || String(err);
+      addLog(`Nonce ${tx.nonce}: execution failed — ${msg}`, "bad");
+    } finally {
+      setExecuting(false);
+    }
+  }, [safeAddress, chain, walletChainId, switchChain, thresholdMet, writeContractAsync, addLog]);
+
   const selectSignable = useCallback(() => {
     const next = new Set();
-    txs.forEach((tx, i) => { if (isSignable(tx)) next.add(i); });
+    txs.forEach((tx, i) => { if (isSignable(tx) || thresholdMet(tx)) next.add(i); });
     setSelected(next);
-  }, [txs, isSignable]);
+  }, [txs, isSignable, thresholdMet]);
 
   const switchWalletChain = useCallback(() => {
     const cid = CHAIN_IDS[chain];
@@ -239,7 +357,7 @@ export default function App() {
   const visibleTxs = txs.filter(tx => {
     const nonceOk = Number(tx.nonce ?? 0) > minNonce;
     if (!nonceOk) return false;
-    if (hideUnactionable && !isSignable(tx)) return false;
+    if (hideUnactionable && !isSignable(tx) && !thresholdMet(tx)) return false;
     return true;
   });
 
@@ -303,7 +421,7 @@ export default function App() {
         <span className="pill">Min nonce: &gt; {minNonce}</span>
         <span className="pill">Signable: {signableCount}</span>
         <span className="pill">Already signed: {alreadySignedCount}</span>
-        <span className="pill">Threshold met: {thresholdDoneCount}</span>
+        <span className="pill">Ready to execute: {thresholdDoneCount}</span>
         <span className="pill">Is owner: {connectedWalletIsOwner() ? "yes" : "no"}</span>
       </div>
 
@@ -318,16 +436,18 @@ export default function App() {
           const count = getConfirmCount(tx);
           const required = getRequiredCount(tx);
           const txData = tx.dataDecoded ? JSON.stringify(tx.dataDecoded, null, 2) : (tx.data || "0x");
+          const isExecuted = !!tx._executedTxHash;
 
           let statusText, statusClass;
-          if (done) { statusText = "Threshold already met"; statusClass = "ok"; }
+          if (isExecuted) { statusText = "Execution submitted"; statusClass = "ok"; }
+          else if (done) { statusText = "Ready to execute"; statusClass = "ok"; }
           else if (alreadySigned) { statusText = "You already signed"; statusClass = "warn"; }
           else if (!connectedWalletIsOwner()) { statusText = "Not an owner"; statusClass = "bad"; }
           else if (signable) { statusText = "Needs your signature"; statusClass = "ok"; }
           else { statusText = "Not signable"; statusClass = "muted"; }
 
           return (
-            <div className="tx-card" key={tx.safeTxHash || vi}>
+            <div className="tx-card" key={tx.safeTxHash || vi} data-status={statusClass}>
               <div className="tx-top">
                 <div>
                   <div><strong>Nonce {tx.nonce}</strong></div>
@@ -335,7 +455,7 @@ export default function App() {
                 </div>
                 <div className="tx-actions">
                   <label>
-                    <input type="checkbox" disabled={!signable}
+                    <input type="checkbox" disabled={!signable && !done}
                       checked={selected.has(idx)}
                       onChange={e => {
                         const next = new Set(selected);
@@ -345,6 +465,18 @@ export default function App() {
                     select
                   </label>
                   <button disabled={!signable} onClick={() => signOne(tx, idx)}>Sign</button>
+                  {done && !isExecuted && (
+                    <button
+                      disabled={executing}
+                      onClick={() => executeOne(tx, idx)}
+                      style={{ borderColor: 'var(--wire-cyan-dim)', color: 'var(--wire-cyan)' }}
+                    >
+                      {executing ? "Executing..." : "⚡ Execute"}
+                    </button>
+                  )}
+                  {isExecuted && (
+                    <span className="small ok">Submitted: {shortAddr(tx._executedTxHash)}</span>
+                  )}
                 </div>
               </div>
 
@@ -373,7 +505,7 @@ export default function App() {
                 </details>
               </div>
 
-              {done && <div className="disabled-note">Already has enough confirmations.</div>}
+              {done && !isExecuted && <div className="disabled-note">Threshold met — ready for execution.</div>}
               {alreadySigned && !done && <div className="disabled-note">You already confirmed this transaction.</div>}
               {!connectedWalletIsOwner() && !done && !alreadySigned && <div className="disabled-note">Connected wallet is not in the Safe owner list.</div>}
             </div>
