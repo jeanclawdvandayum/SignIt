@@ -1,0 +1,152 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 20px;
+  background: #111;
+  color: #eee;
+}
+
+#root {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  text-align: left;
+  border: none;
+  min-height: auto;
+}
+
+h1 {
+  margin-top: 0;
+  margin-bottom: 18px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+label {
+  font-size: 14px;
+}
+
+input, select, button {
+  padding: 8px 10px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+input, select {
+  min-width: 220px;
+}
+
+input[type="number"] {
+  min-width: 100px;
+  width: 100px;
+}
+
+input[type="checkbox"] {
+  min-width: auto;
+  padding: 0;
+}
+
+.mono {
+  font-family: Consolas, Monaco, monospace;
+  word-break: break-all;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.muted { color: #aaa; }
+.ok { color: #7CFC98; }
+.warn { color: #FFD166; }
+.bad { color: #FF7B7B; }
+
+.pill {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: #2a2a2a;
+  border: 1px solid #444;
+  margin-right: 6px;
+  margin-top: 4px;
+}
+
+.tx-card {
+  border: 1px solid #333;
+  border-radius: 14px;
+  padding: 14px;
+  margin: 12px 0;
+  background: #181818;
+}
+
+.tx-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.tx-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 160px;
+  justify-content: flex-end;
+}
+
+.tx-actions label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.disabled-note {
+  color: #999;
+  font-style: italic;
+  margin-top: 8px;
+}
+
+#log {
+  white-space: pre-wrap;
+  background: #0d0d0d;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 20px;
+  min-height: 160px;
+  overflow-x: auto;
+}
+
+details summary {
+  cursor: pointer;
+}
+
+.header-line {
+  margin-bottom: 10px;
+}
+
+.toggle-active {
+  outline: 2px solid #7CFC98;
+}
+
+.wallet-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.wallet-bar button {
+  cursor: pointer;
+  padding: 6px 14px;
+  font-size: 13px;
+}
