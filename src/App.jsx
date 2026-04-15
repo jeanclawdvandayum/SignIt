@@ -249,7 +249,9 @@ export default function App() {
 
   return (
     <div>
-      <h1>Safe Pending Tx Signer</h1>
+      <div className="app-title">SignIt — Safe Multisig Signer</div>
+      <div className="app-subtitle">安全マルチシグ署名端末</div>
+      <div className="app-classification">NERV OPERATIONS — MULTISIG CONFIRMATION PROTOCOL</div>
 
       <div className="wallet-bar">
         <ConnectButton />
@@ -283,9 +285,9 @@ export default function App() {
         </button>
 
         <button onClick={selectSignable}>Select Signable</button>
-        <button onClick={() => setSelected(new Set())}>Clear Selection</button>
-        <button onClick={signSelected} disabled={signing || !selected.size}>
-          {signing ? "Signing..." : "Sign Selected"}
+        <button onClick={() => setSelected(new Set())}>Clear</button>
+        <button onClick={signSelected} disabled={signing || !selected.size} style={{ borderColor: 'var(--data-green-dim)', color: 'var(--data-green)' }}>
+          {signing ? "Signing..." : "▸ Sign Selected"}
         </button>
       </div>
 
