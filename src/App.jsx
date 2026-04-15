@@ -186,7 +186,7 @@ export default function App() {
       }
       addLog(`Nonce ${tx.nonce}: hash verified.`, "ok");
 
-      const sig = await signTypedDataAsync({ domain, types, message: value });
+      const sig = await signTypedDataAsync({ domain, types, primaryType: "SafeTx", message: value });
 
       addLog(`Nonce ${tx.nonce}: submitting confirmation...`);
       const confRes = await fetch(`${API_BASE[chain]}/api/v1/multisig-transactions/${tx.safeTxHash}/confirmations/`, {
