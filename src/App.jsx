@@ -3,6 +3,19 @@ import { useAccount, useSignTypedData, useChainId, useSwitchChain, useWriteContr
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { getAddress, ZeroAddress, TypedDataEncoder, toBigInt } from "ethers";
 
+async function fetchWithRetry(url, opts = {}, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    const res = await fetch(url, opts);
+    if (res.status === 429) {
+      const backoff = (i + 1) * 2000;
+      await new Promise(r => setTimeout(r, backoff));
+      continue;
+    }
+    return res;
+  }
+  return fetch(url, opts);
+}
+
 const API_BASE = {
   ethereum: "https://api.safe.global/tx-service/eth",
   arbitrum: "https://api.safe.global/tx-service/arb1",
@@ -142,7 +155,7 @@ export default function App() {
     setLoading(true);
     try {
       addLog(`Loading Safe info for ${safe} on ${chain}...`);
-      const infoRes = await fetch(`${API_BASE[chain]}/api/v1/safes/${safe}/`);
+      const infoRes = await fetchWithRetry(`${API_BASE[chain]}/api/v1/safes/${safe}/`);
       if (!infoRes.ok) throw new Error(`Safe info failed: ${infoRes.status}`);
       const info = await infoRes.json();
       setSafeInfo(info);
@@ -158,7 +171,7 @@ export default function App() {
       const all = [];
       let nextUrl = `${API_BASE[chain]}/api/v1/safes/${safe}/multisig-transactions/?executed=false&trusted=true&queued=true`;
       while (nextUrl) {
-        const res = await fetch(nextUrl);
+        const res = await fetchWithRetry(nextUrl);
         if (!res.ok) throw new Error(`Failed: ${res.status}`);
         const data = await res.json();
         all.push(...(data.results || []));
@@ -238,7 +251,7 @@ export default function App() {
       const sig = await signTypedDataAsync({ domain, types, primaryType: "SafeTx", message: value });
 
       addLog(`Nonce ${tx.nonce}: submitting confirmation...`);
-      const confRes = await fetch(`${API_BASE[chain]}/api/v1/multisig-transactions/${tx.safeTxHash}/confirmations/`, {
+      const confRes = await fetchWithRetry(`${API_BASE[chain]}/api/v1/multisig-transactions/${tx.safeTxHash}/confirmations/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signature: sig }),
